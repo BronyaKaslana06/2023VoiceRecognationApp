@@ -16,23 +16,30 @@ import wave
 import numpy as np
 import sherpa_ncnn
 
+from pydub import AudioSegment
+import re
+import cn2an
 
 def main():
     # Please refer to https://k2-fsa.github.io/sherpa/ncnn/index.html
     # to download the model files
     recognizer = sherpa_ncnn.Recognizer(
-        tokens="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/tokens.txt",
-        encoder_param="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/encoder_jit_trace-pnnx.ncnn.param",
-        encoder_bin="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/encoder_jit_trace-pnnx.ncnn.bin",
-        decoder_param="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/decoder_jit_trace-pnnx.ncnn.param",
-        decoder_bin="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/decoder_jit_trace-pnnx.ncnn.bin",
-        joiner_param="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/joiner_jit_trace-pnnx.ncnn.param",
-        joiner_bin="./sherpa-ncnn-conv-emformer-transducer-2022-12-06/joiner_jit_trace-pnnx.ncnn.bin",
+        tokens="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/tokens.txt",
+        encoder_param="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/encoder_jit_trace-pnnx.ncnn.param",
+        encoder_bin="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/encoder_jit_trace-pnnx.ncnn.bin",
+        decoder_param="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/decoder_jit_trace-pnnx.ncnn.param",
+        decoder_bin="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/decoder_jit_trace-pnnx.ncnn.bin",
+        joiner_param="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/joiner_jit_trace-pnnx.ncnn.param",
+        joiner_bin="../sherpa-ncnn-streaming-zipformer-bilingual-zh-en-2023-02-13/joiner_jit_trace-pnnx.ncnn.bin",
         num_threads=4,
     )
+    filename = 'test_wavs/ElevatorTest.mp3'
+    audio = AudioSegment.from_mp3(filename)
+    # 将音频导出为wav文件
+    wav_file_path = 'test_wavs/output.wav'
+    audio.export(wav_file_path, format='wav')
 
-    filename = "./sherpa-ncnn-conv-emformer-transducer-2022-12-06/test_wavs/1.wav"
-    with wave.open(filename) as f:
+    with wave.open(wav_file_path) as f:
         # Note: If wave_file_sample_rate is different from
         # recognizer.sample_rate, we will do resampling inside sherpa-ncnn
         wave_file_sample_rate = f.getframerate()
@@ -54,19 +61,19 @@ def main():
         end = min(end, samples_float32.shape[0])
         recognizer.accept_waveform(wave_file_sample_rate, samples_float32[start:end])
         start = end
-        text = recognizer.text
-        if text:
-            print(text)
-
-        # simulate streaming by sleeping
         time.sleep(0.1)
 
     tail_paddings = np.zeros(int(wave_file_sample_rate * 0.5), dtype=np.float32)
     recognizer.accept_waveform(wave_file_sample_rate, tail_paddings)
     recognizer.input_finished()
     text = recognizer.text
+    output_file_path = 'output/output.txt'  # 设置输出文件的路径
     if text:
+        with open(output_file_path, 'w') as file:
+            file.write(text)
         print(text)
+    with open(output_file_path, 'r') as file:
+        text = file.read()
 
 
 if __name__ == "__main__":

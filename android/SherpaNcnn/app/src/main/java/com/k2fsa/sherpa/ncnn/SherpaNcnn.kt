@@ -17,6 +17,8 @@ data class ModelConfig(
     var joinerBin: String,
     var tokens: String,
     var numThreads: Int = 1,
+
+
     var useGPU: Boolean = true, // If there is a GPU and useGPU true, we will use GPU
 )
 
@@ -126,6 +128,7 @@ to add more pre-trained models
 fun getModelConfig(type: Int, useGPU: Boolean): ModelConfig? {
     when (type) {
         0 -> {
+            //val modelDir = "sherpa-ncnn-2022-09-30"
             val modelDir = "sherpa-ncnn-2022-09-30"
             return ModelConfig(
                 encoderParam = "$modelDir/encoder_jit_trace-pnnx.ncnn.param",
