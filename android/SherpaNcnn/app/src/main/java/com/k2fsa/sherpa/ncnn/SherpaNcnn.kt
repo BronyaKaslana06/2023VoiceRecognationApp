@@ -17,6 +17,8 @@ data class ModelConfig(
     var joinerBin: String,
     var tokens: String,
     var numThreads: Int = 1,
+
+
     var useGPU: Boolean = true, // If there is a GPU and useGPU true, we will use GPU
 )
 
