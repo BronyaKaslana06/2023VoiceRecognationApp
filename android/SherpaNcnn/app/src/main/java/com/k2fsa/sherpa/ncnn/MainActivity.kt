@@ -2,11 +2,18 @@ package com.k2fsa.sherpa.ncnn
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Bundle
+import android.text.Layout
+import android.text.SpannableString
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.method.ScrollingMovementMethod
+import android.text.style.AlignmentSpan
+import android.text.style.ForegroundColorSpan
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
@@ -16,6 +23,13 @@ import kotlin.concurrent.thread
 
 private const val TAG = "sherpa-ncnn"
 private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
+
+data class Message(val text: SpannableString, val type: MessageType)
+
+enum class MessageType {
+    USER, RESPONSE
+}
+
 
 class MainActivity : AppCompatActivity() {
     private val permissions: Array<String> = arrayOf(Manifest.permission.RECORD_AUDIO)
@@ -40,9 +54,10 @@ class MainActivity : AppCompatActivity() {
     private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private var idx: Int = 0
     private var lastText: String = ""
-    private var endOrNot: Boolean = false
+//    private var endOrNot: Boolean = false
     private var num: Int = 0
     private var numString: String = ""
+    private val messages = mutableListOf<Message>() //一个数组，用于存储每一条对话
 
     @Volatile
     private var isRecording: Boolean = false
@@ -83,6 +98,14 @@ class MainActivity : AppCompatActivity() {
         textView = findViewById(R.id.my_text)
         textView.movementMethod = ScrollingMovementMethod()
     }
+    private fun displayMessages() {
+        val spannableBuilder = SpannableStringBuilder()
+        messages.forEach { message ->
+            spannableBuilder.append(message.text)
+            spannableBuilder.append("\n\n")
+        }
+        textView.text = spannableBuilder
+    }
 
     private fun onclick() {
         if (!isRecording) {
@@ -100,6 +123,7 @@ class MainActivity : AppCompatActivity() {
             lastText = ""
             idx = 0
             numString = ""
+            messages.clear()
 
             recordingThread = thread(true) {
                 processSamples()
@@ -113,6 +137,11 @@ class MainActivity : AppCompatActivity() {
             recordButton.setText(R.string.start)
             Log.i(TAG, "Stopped recording")
             numString = ""
+            textView.text = ""
+            lastText = ""
+            idx = 0
+            numString = ""
+            messages.clear()
         }
     }
     private fun outputNumber(text: String): Int?{
@@ -192,12 +221,51 @@ class MainActivity : AppCompatActivity() {
         return null
     }
 
+    private fun addMessage(text: String, type: MessageType) {
+        val prefix: String
+        val spannableString: SpannableString
+        val colorSpan: ForegroundColorSpan
+
+        when (type) {
+            MessageType.USER -> {
+                prefix = "用户：$text"
+                colorSpan = ForegroundColorSpan(Color.BLUE)
+            }
+            MessageType.RESPONSE -> {
+                prefix = text
+                colorSpan = ForegroundColorSpan(Color.RED)
+            }
+        }
+
+        spannableString = SpannableString(prefix)
+        spannableString.setSpan(colorSpan, 0, prefix.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+
+        val alignmentSpan = AlignmentSpan.Standard(
+            if (type == MessageType.USER)
+                Layout.Alignment.ALIGN_NORMAL
+            else
+                Layout.Alignment.ALIGN_OPPOSITE
+        )
+        spannableString.setSpan(alignmentSpan, 0, prefix.length, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
+
+        messages.add(Message(spannableString, type))
+        displayMessages()
+    }
+
     private fun processSamples() {
         Log.i(TAG, "processing samples")
 
-        val interval = 0.1 // i.e., 100 ms
+        val interval = 0.1
         val bufferSize = (interval * sampleRateInHz).toInt() // in samples
         val buffer = ShortArray(bufferSize)
+
+        var userStart = false
+        var emptyOp = true //防止不重复
+        var awaitingCoffeeType = false  //咖啡的逻辑
+        var awaitingCoffeeTemperature = false   //咖啡的逻辑
+        var coffeeProcessOver = true
+        var coffeeType = "" //咖啡类型
+        var coffeeTemp = "" //咖啡温度
 
         while (isRecording) {
             val ret = audioRecord?.read(buffer, 0, buffer.size)
@@ -212,38 +280,94 @@ class MainActivity : AppCompatActivity() {
                     val isEndpoint = model.isEndpoint()
                     var now_num: Int? = null
 
-                    if (isEndpoint) {
-                        endOrNot = true
-                    }
-
                     val text = model.text
-                    if (text.isNotBlank() && text != lastText) {
-                        lastText = text
-                        now_num = outputNumber(text)    // now_num
-                        if (now_num != null) {
-                            if (num == 0) {
-                                num = now_num // 如果num为0，将当前结果添加到numString
+                    // 判断用户是否开始说话
+                    if(!userStart) {
+                        if (text.isNotBlank()) {
+                            userStart = true
+                        }
+                    }
+                    //若用户一句话已说完
+                    else if(isEndpoint) {
+                        //检查语音识别内容是否有变化
+                        if (text.isNotBlank() && text != lastText) {
+                            lastText = text
+                            emptyOp = true
+                            //检查是否含有电梯楼层
+                            now_num = outputNumber(text)    // now_num
+                            if (now_num != null) {
+                                if (num == 0) {
+                                    num = now_num // 如果num为0，将当前结果添加到numString
+                                }
+                                else if(num != now_num) {
+                                    num = now_num
+                                }
                             }
-                            else if(num != now_num) {
-                                num = now_num
+                            // 含有电梯楼层，回复
+                            if (num!=0 && emptyOp) {
+                                addMessage(lastText, MessageType.USER)
+                                addMessage("您要去第 $num 楼", MessageType.RESPONSE)
+                                model.reset()
+                                emptyOp = false
+                                num = 0
                             }
-                            else{
-                                endOrNot = true
+                            // 不含电梯楼层
+                            else if(num==0 && emptyOp) {
+                                Log.d(TAG, "Processing user input: $lastText")
+                                // 点咖啡的逻辑
+                                if (lastText.contains("咖啡") && coffeeProcessOver) {
+                                    addMessage(lastText, MessageType.USER)
+                                    addMessage("好的，您是需要拿铁还是美式？", MessageType.RESPONSE)
+                                    awaitingCoffeeType = true
+                                    coffeeProcessOver = false
+                                    lastText = ""
+                                    model.reset()
+                                }
+                                //等待顾客回复咖啡类型
+                                else if (awaitingCoffeeType) {
+                                    coffeeType = when {
+                                        "拿铁" in lastText -> "拿铁"
+                                        "美式" in lastText -> "美式"
+                                        else -> ""
+                                    }
+                                    if (coffeeType.isNotEmpty()) {
+                                        addMessage(lastText, MessageType.USER)
+                                        addMessage("您需要冰咖啡还是热咖啡？", MessageType.RESPONSE)
+                                        awaitingCoffeeType = false
+                                        awaitingCoffeeTemperature = true
+                                        lastText = ""
+                                        model.reset()
+                                    }
+                                }
+                                //等待顾客回复咖啡温度
+                                else if (awaitingCoffeeTemperature) {
+                                    coffeeTemp = when {
+                                        "冰" in lastText -> "冰"
+                                        "热" in lastText -> "热"
+                                        else -> ""
+                                    }
+                                    if (coffeeTemp.isNotEmpty() && !coffeeProcessOver) {
+                                        addMessage(lastText, MessageType.USER)
+                                        addMessage("您想要的是一份${coffeeTemp}${coffeeType}", MessageType.RESPONSE)
+                                        awaitingCoffeeTemperature = false
+                                        lastText = ""
+                                        coffeeProcessOver = true
+                                        model.reset()
+                                    }
+                                }
+                                else {
+                                    addMessage(lastText, MessageType.USER)
+//                                    addMessage("没有听懂您说的什么，请再重复一遍", MessageType.RESPONSE)
+//                                    model.reset()
+                                    num = 0
+                                    emptyOp = false
+                                    model.reset()
+                                }
                             }
                         }
+
                     }
 
-                    if (endOrNot && num!=0) {
-                        numString += "$idx: $num" // 添加到numString
-                        textView.text = numString
-                        model.reset()
-                        endOrNot = false
-                        num = 0
-                        if (text.isNotBlank()) {
-                            idx++
-                            numString += "\n" // 添加换行符
-                        }
-                    }
                 }
             }
         }

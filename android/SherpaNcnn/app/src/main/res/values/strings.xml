@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">数字识别系统</string>
+    <string name="app_name">语音交互系统</string>
     <string name="hint">点击“开始”按钮开始数字识别
     </string>
     <string name="start">开始</string>
